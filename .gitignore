@@ -1,2 +1,8 @@
+# rust
 /target
+
+# ide
 /.vscode
+
+# private
+.env
