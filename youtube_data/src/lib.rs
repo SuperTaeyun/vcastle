@@ -5,7 +5,6 @@ pub mod search;
 pub mod videos;
 
 pub use handler::YouTubeDataApiHandler;
-pub use model::ListResponse;
 
 #[cfg(test)]
 pub(crate) fn get_develop_key() -> String {

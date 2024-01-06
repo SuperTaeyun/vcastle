@@ -1,8 +1,10 @@
-use crate::model::{Thumbnail, ThumbnailKind};
+use crate::model::{ListResponse, Thumbnail, ThumbnailKind};
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+
+pub type SearchListResponse = ListResponse<SearchListResource>;
 
 /// Structure shows the format of a search result.
 #[derive(Debug, Serialize, Deserialize)]
