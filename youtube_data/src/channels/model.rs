@@ -1,8 +1,10 @@
-use crate::model::{Localization, Thumbnail, ThumbnailKind};
+use crate::model::{ListResponse, Localization, Thumbnail, ThumbnailKind};
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+
+pub type ChannelListResponse = ListResponse<ChannelListResource>;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ChannelListResource {
