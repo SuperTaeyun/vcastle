@@ -1,10 +1,11 @@
 pub mod channels;
-mod handler;
-mod model;
 pub mod search;
 pub mod videos;
 
-pub use handler::YouTubeDataApiHandler;
+mod handler;
+mod model;
+
+pub use handler::YouTube;
 
 #[cfg(test)]
 pub(crate) fn get_develop_key() -> String {

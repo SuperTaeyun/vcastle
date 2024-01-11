@@ -1,15 +1,15 @@
-use reqwest::Client;
-
 pub mod model;
 
-pub struct SearchApi {
-    api_key: String,
-    client: Client,
+use crate::handler::YouTube;
+
+#[derive(Clone)]
+pub struct SearchService {
+    youtube: Box<YouTube>,
 }
 
-impl SearchApi {
-    pub fn new(api_key: String, client: Client) -> Self {
-        Self { api_key, client }
+impl SearchService {
+    pub fn new(youtube: Box<YouTube>) -> Self {
+        Self { youtube }
     }
 
     pub fn list(&self) -> SearchList {

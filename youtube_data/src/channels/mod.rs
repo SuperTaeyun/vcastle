@@ -1,53 +1,43 @@
-use std::collections::HashMap;
-
-use reqwest::Client;
-use serde::Serialize;
-
 pub mod model;
 
-pub struct ChannelApi {
-    api_key: String,
-    client: Client,
+use crate::handler::YouTube;
+use serde::Serialize;
+use std::collections::HashMap;
+
+#[derive(Clone)]
+pub struct ChannelsService {
+    youtube: Box<YouTube>,
 }
 
-impl ChannelApi {
-    pub fn new(api_key: String, client: Client) -> Self {
-        Self { api_key, client }
+impl ChannelsService {
+    pub fn new(youtube: Box<YouTube>) -> Self {
+        Self { youtube }
     }
 
     pub fn list(&self, part: Vec<ChannelPart>) -> ChannelList {
-        ChannelList::new(&self.api_key, &self.client, part)
+        ChannelList::new(&self, part)
     }
 }
 
 pub struct ChannelList<'a> {
-    api_key: &'a str,
-
-    client: &'a Client,
-
+    service: &'a ChannelsService,
     part: Vec<ChannelPart>,
-
     for_username: Option<String>,
-
     id: Option<String>,
-
     managed_by_me: Option<bool>,
-
     mine: Option<bool>,
-
     max_results: Option<u32>,
 }
 
 impl<'a> ChannelList<'a> {
-    pub fn new(api_key: &'a str, client: &'a Client, part: Vec<ChannelPart>) -> Self {
+    pub fn new(service: &'a ChannelsService, part: Vec<ChannelPart>) -> Self {
         let part = if part.is_empty() {
             vec![ChannelPart::Id]
         } else {
             part
         };
         Self {
-            api_key,
-            client,
+            service,
             part,
             for_username: None,
             id: None,
@@ -92,7 +82,7 @@ impl<'a> ChannelList<'a> {
         let mut query = HashMap::<&str, &str>::new();
 
         // key
-        query.insert("key", self.api_key);
+        query.insert("key", &self.service.youtube.api_key);
 
         // part
         let part = self
@@ -115,7 +105,9 @@ impl<'a> ChannelList<'a> {
         // mine
 
         // max_results
-        self.client
+        self.service
+            .youtube
+            .client
             .get("https://www.googleapis.com/youtube/v3/channels")
             .query(&query)
             .send()
@@ -161,16 +153,15 @@ impl ToString for ChannelPart {
 
 #[cfg(test)]
 mod tests {
-
     use super::*;
-    use crate::{get_develop_key, YouTubeDataApiHandler};
+    use crate::{get_develop_key, YouTube};
 
     use std::vec;
 
     #[tokio::test]
     async fn test_get_list() {
         let api_key = get_develop_key();
-        let handler = YouTubeDataApiHandler::new(api_key);
+        let handler = YouTube::new(api_key, None);
 
         let response = handler
             .channels()
