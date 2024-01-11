@@ -1487,6 +1487,7 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
+ "thiserror",
  "time",
  "tokio",
  "tracing",
@@ -1775,5 +1776,6 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
+ "thiserror",
  "tokio",
 ]
