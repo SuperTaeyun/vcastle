@@ -1,4 +1,5 @@
 pub mod channels;
+pub mod error;
 pub mod search;
 pub mod videos;
 
