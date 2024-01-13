@@ -1,6 +1,6 @@
 pub mod model;
 
-use crate::handler::YouTube;
+use crate::YouTube;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::fmt::Display;

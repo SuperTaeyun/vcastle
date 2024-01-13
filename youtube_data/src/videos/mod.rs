@@ -1,6 +1,6 @@
 pub mod model;
 
-use crate::handler::YouTube;
+use crate::YouTube;
 
 #[derive(Clone)]
 pub struct VideosService {
