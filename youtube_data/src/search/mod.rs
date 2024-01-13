@@ -17,10 +17,28 @@ impl SearchService {
     }
 }
 
-pub struct SearchList {}
+pub struct SearchList<'a> {
+    service: &'a SearchService,
+}
 
-impl SearchList {
+impl<'a> SearchList<'a> {
     pub fn request() {}
+}
+
+pub enum SearchListPart {
+    Id,
+    Snippet,
+}
+
+impl std::fmt::Display for SearchListPart {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let str = match self {
+            SearchListPart::Id => "id",
+            SearchListPart::Snippet => "snippet",
+        }
+        .to_string();
+        write!(f, "{}", str)
+    }
 }
 
 #[cfg(test)]

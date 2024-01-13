@@ -3,6 +3,7 @@ pub mod model;
 use crate::handler::YouTube;
 use serde::Serialize;
 use std::collections::HashMap;
+use std::fmt::Display;
 
 #[derive(Clone)]
 pub struct ChannelsService {
@@ -14,14 +15,14 @@ impl ChannelsService {
         Self { youtube }
     }
 
-    pub fn list(&self, part: Vec<ChannelPart>) -> ChannelList {
+    pub fn list(&self, part: Vec<ChannelListPart>) -> ChannelList {
         ChannelList::new(&self, part)
     }
 }
 
 pub struct ChannelList<'a> {
     service: &'a ChannelsService,
-    part: Vec<ChannelPart>,
+    part: Vec<ChannelListPart>,
     for_username: Option<String>,
     id: Option<String>,
     managed_by_me: Option<bool>,
@@ -30,9 +31,9 @@ pub struct ChannelList<'a> {
 }
 
 impl<'a> ChannelList<'a> {
-    pub fn new(service: &'a ChannelsService, part: Vec<ChannelPart>) -> Self {
+    pub fn new(service: &'a ChannelsService, part: Vec<ChannelListPart>) -> Self {
         let part = if part.is_empty() {
-            vec![ChannelPart::Id]
+            vec![ChannelListPart::Id]
         } else {
             part
         };
@@ -47,7 +48,7 @@ impl<'a> ChannelList<'a> {
         }
     }
 
-    pub fn part(&mut self, part: Vec<ChannelPart>) -> &mut Self {
+    pub fn part(&mut self, part: Vec<ChannelListPart>) -> &mut Self {
         self.part = part;
         self
     }
@@ -82,7 +83,8 @@ impl<'a> ChannelList<'a> {
         let mut query = HashMap::<&str, &str>::new();
 
         // key
-        query.insert("key", &self.service.youtube.api_key);
+        let youtube = &self.service.youtube;
+        query.insert("key", &youtube.api_key);
 
         // part
         let part = self
@@ -120,7 +122,7 @@ impl<'a> ChannelList<'a> {
 }
 
 #[derive(Debug, Serialize)]
-pub enum ChannelPart {
+pub enum ChannelListPart {
     AuditDetails,
     BrandingSettings,
     ContentDetails,
@@ -133,21 +135,22 @@ pub enum ChannelPart {
     TopicDetails,
 }
 
-impl ToString for ChannelPart {
-    fn to_string(&self) -> String {
-        match self {
-            ChannelPart::AuditDetails => "auditDetails",
-            ChannelPart::BrandingSettings => "brandingSettings",
-            ChannelPart::ContentDetails => "contentDetails",
-            ChannelPart::ContentOwnerDetails => "contentOwnerDetails",
-            ChannelPart::Id => "id",
-            ChannelPart::Localizations => "localizations",
-            ChannelPart::Snippet => "snippet",
-            ChannelPart::Statistics => "statistics",
-            ChannelPart::Status => "status",
-            ChannelPart::TopicDetails => "topicDetails",
+impl Display for ChannelListPart {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let str = match self {
+            ChannelListPart::AuditDetails => "auditDetails",
+            ChannelListPart::BrandingSettings => "brandingSettings",
+            ChannelListPart::ContentDetails => "contentDetails",
+            ChannelListPart::ContentOwnerDetails => "contentOwnerDetails",
+            ChannelListPart::Id => "id",
+            ChannelListPart::Localizations => "localizations",
+            ChannelListPart::Snippet => "snippet",
+            ChannelListPart::Statistics => "statistics",
+            ChannelListPart::Status => "status",
+            ChannelListPart::TopicDetails => "topicDetails",
         }
-        .to_string()
+        .to_string();
+        write!(f, "{}", str)
     }
 }
 
@@ -165,7 +168,7 @@ mod tests {
 
         let response = handler
             .channels()
-            .list(vec![ChannelPart::Snippet])
+            .list(vec![ChannelListPart::Snippet])
             .id("UCa9Y57gfeY0Zro_noHRVrnw")
             .request()
             .await;

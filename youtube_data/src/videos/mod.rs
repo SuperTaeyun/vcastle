@@ -17,10 +17,28 @@ impl VideosService {
     }
 }
 
-pub struct VideoList {}
+pub struct VideoList<'a> {
+    service: &'a VideosService,
+}
 
-impl VideoList {
+impl<'a> VideoList<'a> {
     pub fn request() {}
+}
+
+pub enum VideoListPart {
+    Id,
+    Snippet,
+}
+
+impl std::fmt::Display for VideoListPart {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let str = match self {
+            VideoListPart::Id => "id",
+            VideoListPart::Snippet => "snippet",
+        }
+        .to_string();
+        write!(f, "{}", str)
+    }
 }
 
 #[cfg(test)]
