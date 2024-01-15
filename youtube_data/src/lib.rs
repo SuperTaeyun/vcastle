@@ -69,6 +69,10 @@ impl YouTube {
 
 /// The base trait for all YouTube Data CRUD APIs.
 pub trait DataApi {
+    fn url(&self, base_path: impl Into<String>) -> String {
+        format!("{}/{}", base_path.into(), self.api_path())
+    }
+
     fn api_path(&self) -> &str;
 
     fn insert_query_parameter(
@@ -89,7 +93,7 @@ pub trait DataApi {
         &self,
         map: &mut HashMap<String, String>,
         key: impl Into<String>,
-        value: Option<Vec<impl ToString>>,
+        value: Option<&Vec<impl ToString>>,
     ) {
         if let Some(value) = value {
             let value = value
@@ -239,8 +243,16 @@ mod tests {
 
     impl DataApi for Test {
         fn api_path(&self) -> &str {
-            ""
+            "tests"
         }
+    }
+
+    #[test]
+    fn test_url() {
+        let test = Test {};
+        let url = test.url("https://www.googleapis.com/youtube/v3");
+
+        assert_eq!(url, "https://www.googleapis.com/youtube/v3/tests");
     }
 
     #[test]
@@ -282,7 +294,7 @@ mod tests {
         let test = Test {};
         let mut map = HashMap::<String, String>::new();
 
-        test.insert_query_parameters(&mut map, "key1", Some(vec!["value1", "value2"]));
+        test.insert_query_parameters(&mut map, "key1", Some(&vec!["value1", "value2"]));
 
         assert_eq!(map.get("key1").unwrap(), "value1,value2");
     }

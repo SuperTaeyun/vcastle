@@ -57,7 +57,7 @@ struct VideoList<'a> {
 
 impl DataApi for VideoList<'_> {
     fn api_path(&self) -> &str {
-        "/videos"
+        "videos"
     }
 }
 

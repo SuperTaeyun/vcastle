@@ -68,7 +68,7 @@ struct SearchList<'a> {
 
 impl DataApi for SearchList<'_> {
     fn api_path(&self) -> &str {
-        "/search"
+        "search"
     }
 }
 

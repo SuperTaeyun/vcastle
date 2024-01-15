@@ -35,7 +35,7 @@ struct ChannelList<'a> {
 
 impl DataApi for ChannelList<'_> {
     fn api_path(&self) -> &str {
-        "/channels"
+        "channels"
     }
 }
 
