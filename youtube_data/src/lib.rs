@@ -10,7 +10,7 @@ pub mod search;
 pub mod videos;
 
 use channels::ChannelsService;
-use error::Result;
+use error::{Error, Result};
 use search::SearchService;
 use videos::VideosService;
 
