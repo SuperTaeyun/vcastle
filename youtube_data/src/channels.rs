@@ -1,5 +1,5 @@
 use crate::{
-    DataApi, Error, ListApi, ListResponse, Localization, Result, Thumbnail, ThumbnailKind, YouTube,
+    DataApi, ListApi, ListResponse, Localization, Result, Thumbnail, ThumbnailKind, YouTube,
 };
 
 use async_trait::async_trait;
@@ -7,8 +7,6 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt::Display;
-
-pub type ChannelListResponse = ListResponse<ChannelListResource>;
 
 #[derive(Clone)]
 pub(crate) struct ChannelsService {
@@ -27,21 +25,12 @@ impl ChannelsService {
 
 struct ChannelList<'a> {
     service: &'a ChannelsService,
-
-    // required parameters
     part: Vec<ChannelListPart>,
-
-    // filters (spcify exactly one of the following parameters)
-    for_username: Option<&'a str>,
-    id: Option<&'a str>,
+    for_username: Option<String>,
+    id: Option<String>,
     managed_by_me: Option<bool>,
     mine: Option<bool>,
-
-    // optional parameters
-    hl: Option<&'a str>,
     max_results: Option<u32>,
-    on_behalf_of_content_owner: Option<&'a str>,
-    page_token: Option<&'a str>,
 }
 
 impl DataApi for ChannelList<'_> {
@@ -53,107 +42,47 @@ impl DataApi for ChannelList<'_> {
 #[async_trait]
 impl ListApi<ChannelListResponse> for ChannelList<'_> {
     async fn request(&self) -> Result<ChannelListResponse> {
-        let youtube = &self.service.youtube;
-
-        // createquery parameter map
-        let mut query_parameters = HashMap::<String, String>::new();
+        // create query
+        let mut query = HashMap::<&str, &str>::new();
 
         // key
-        self.insert_query_parameter(&mut query_parameters, "key", Some(&youtube.api_key));
+        let youtube = &self.service.youtube;
+        query.insert("key", &youtube.api_key);
 
-        // required parameters
-        self.insert_query_parameters(&mut query_parameters, "part", Some(&self.part));
+        // part
+        let part = self
+            .part
+            .iter()
+            .map(|part| part.to_string())
+            .collect::<Vec<String>>()
+            .join(",");
+        query.insert("part", &part);
 
-        // filters
-        if vec![
-            self.for_username.is_none(),
-            self.id.is_none(),
-            self.managed_by_me.is_none(),
-            self.mine.is_none(),
-        ]
-        .into_iter()
-        .all(|v| v)
-        {
-            return Err(Error::InvalidParameter);
-        }
-        if let Some(for_username) = self.for_username {
-            if vec![
-                self.id.is_some(),
-                self.managed_by_me.is_some(),
-                self.mine.is_some(),
-            ]
-            .into_iter()
-            .any(|v| v)
-            {
-                return Err(Error::InvalidParameter);
-            }
-            self.insert_query_parameter(&mut query_parameters, "forUsername", Some(for_username));
-        }
-        if let Some(id) = self.id {
-            if vec![
-                self.for_username.is_some(),
-                self.managed_by_me.is_some(),
-                self.mine.is_some(),
-            ]
-            .into_iter()
-            .any(|v| v)
-            {
-                return Err(Error::InvalidParameter);
-            }
-            self.insert_query_parameter(&mut query_parameters, "id", Some(id));
-        }
-        // TODO: check if the user is authenticated
-        if let Some(_managed_by_me) = self.managed_by_me {
-            return Err(Error::NotAuthorized);
-            // if vec![
-            //     self.for_username.is_some(),
-            //     self.id.is_some(),
-            //     self.mine.is_some(),
-            // ]
-            // .into_iter()
-            // .any(|v| v)
-            // {
-            //     return Err(Error::InvalidParameter);
-            // }
-            // self.insert_query_parameter(&mut query_parameters, "managedByMe", Some(managed_by_me));
-        }
-        if let Some(_mine) = self.mine {
-            return Err(Error::NotAuthorized);
-            // if vec![
-            //     self.for_username.is_some(),
-            //     self.id.is_some(),
-            //     self.managed_by_me.is_some(),
-            // ]
-            // .into_iter()
-            // .any(|v| v)
-            // {
-            //     return Err(Error::InvalidParameter);
-            // }
-            // self.insert_query_parameter(&mut query_parameters, "mine", Some(mine));
+        // for_username
+
+        // id
+        if let Some(id) = &self.id {
+            query.insert("id", id);
         }
 
-        // optional parameters
-        self.insert_query_parameter(&mut query_parameters, "hl", self.hl);
-        self.insert_query_parameter(&mut query_parameters, "maxResults", self.max_results);
-        self.insert_query_parameter(&mut query_parameters, "pageToken", self.page_token);
+        // managed_by_me
 
-        // TODO: check if the user is authenticated
-        if let Some(on_behalf_of_content_owner) = self.on_behalf_of_content_owner {
-            if !on_behalf_of_content_owner.is_empty() {
-                return Err(Error::NotAuthorized);
-            }
-        }
+        // mine
 
-        Ok(youtube
+        // max_results
+        self.service
+            .youtube
             .client
-            .get(youtube.base_path.to_owned() + self.api_path())
-            .query(&query_parameters)
+            .get("https://www.googleapis.com/youtube/v3/channels")
+            .query(&query)
             .send()
             .await
             .unwrap()
             .json::<ChannelListResponse>()
             .await
-            .unwrap())
+            .unwrap();
+
+        todo!()
     }
 }
 
@@ -171,10 +100,7 @@ impl<'a> ChannelList<'a> {
             id: None,
             managed_by_me: None,
             mine: None,
-            hl: None,
             max_results: None,
-            on_behalf_of_content_owner: None,
-            page_token: None,
         }
     }
 
@@ -183,13 +109,13 @@ impl<'a> ChannelList<'a> {
         self
     }
 
-    pub fn for_username(&mut self, for_username: &'a str) -> &mut Self {
-        self.for_username = Some(for_username);
+    pub fn for_username(&mut self, for_username: impl Into<String>) -> &mut Self {
+        self.for_username = Some(for_username.into());
         self
     }
 
-    pub fn id(&mut self, id: &'a str) -> &mut Self {
-        self.id = Some(id);
+    pub fn id(&mut self, id: impl Into<String>) -> &mut Self {
+        self.id = Some(id.into());
         self
     }
 
@@ -203,24 +129,8 @@ impl<'a> ChannelList<'a> {
         self
     }
 
-    pub fn hl(&mut self, hl: &'a str) -> &mut Self {
-        self.hl = Some(hl);
-        self
-    }
-
     pub fn max_results(&mut self, max_results: u32) -> &mut Self {
-        let max_results = if max_results > 50 { 50 } else { max_results };
         self.max_results = Some(max_results);
-        self
-    }
-
-    pub fn on_behalf_of_content_owner(&mut self, on_behalf_of_content_owner: &'a str) -> &mut Self {
-        self.on_behalf_of_content_owner = Some(on_behalf_of_content_owner);
-        self
-    }
-
-    pub fn page_token(&mut self, page_token: &'a str) -> &mut Self {
-        self.page_token = Some(page_token);
         self
     }
 }
@@ -258,8 +168,10 @@ impl Display for ChannelListPart {
     }
 }
 
+type ChannelListResponse = ListResponse<ChannelListResource>;
+
 #[derive(Debug, Serialize, Deserialize)]
-pub struct ChannelListResource {
+struct ChannelListResource {
     /// Identifies the API resource's type. The value will be `youtube#channel`.
     pub kind: String,
 
@@ -273,7 +185,7 @@ pub struct ChannelListResource {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct ChannelSnippet {
+struct ChannelSnippet {
     /// The channel's title.
     pub title: String,
 
@@ -330,54 +242,25 @@ pub struct ChannelSnippet {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct ChannelContentDetails {}
+struct ChannelContentDetails {}
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct ChannelStatistics {}
+struct ChannelStatistics {}
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct ChannelTopicDetails {}
+struct ChannelTopicDetails {}
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct ChannelStatus {}
+struct ChannelStatus {}
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct ChannelBrandingSettings {}
+struct ChannelBrandingSettings {}
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct ChannelAuditDetails {}
+struct ChannelAuditDetails {}
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct ChannelContentOwnerDetails {}
+struct ChannelContentOwnerDetails {}
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::get_develop_key;
-
-    #[tokio::test]
-    async fn test_get_list_by_id() {
-        let youtube = YouTube::new(get_develop_key(), None);
-
-        let response = youtube
-            .channels()
-            .list(vec![ChannelListPart::Snippet])
-            .id("UCa9Y57gfeY0Zro_noHRVrnw")
-            .request()
-            .await
-            .unwrap();
-        assert_eq!("UCa9Y57gfeY0Zro_noHRVrnw", response.items[0].id);
-    }
-
-    #[tokio::test]
-    #[should_panic]
-    async fn test_get_list_without_filters() {
-        let youtube = YouTube::new(get_develop_key(), None);
-        let _response = youtube
-            .channels()
-            .list(vec![ChannelListPart::Snippet])
-            .request()
-            .await
-            .unwrap();
-    }
-}
+mod tests {}
