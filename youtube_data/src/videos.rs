@@ -1,10 +1,239 @@
-use crate::model::{ListResponse, Localization, Thumbnail, ThumbnailKind};
+use crate::{
+    DataApi, ListApi, ListResponse, Localization, Result, Thumbnail, ThumbnailKind, YouTube,
+};
 
+use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 pub type VideoListResponse = ListResponse<VideoListResource>;
+
+#[derive(Clone)]
+pub(crate) struct VideosService {
+    youtube: Box<YouTube>,
+}
+
+impl VideosService {
+    pub fn new(youtube: Box<YouTube>) -> Self {
+        Self { youtube }
+    }
+
+    pub fn list(&self, part: Vec<Part>) -> VideoList {
+        VideoList::new(&self, part)
+    }
+}
+
+struct VideoList<'a> {
+    service: &'a VideosService,
+
+    // required parameters
+    part: Vec<Part>,
+
+    // filters (specify exactly one of the following parameters)
+    chart: Option<&'a str>,
+
+    id: Option<&'a str>,
+
+    my_rating: Option<MyRating>,
+
+    // optional parameters
+    hl: Option<&'a str>,
+
+    max_height: Option<u32>,
+
+    max_results: Option<u32>,
+
+    max_width: Option<u32>,
+
+    on_behalf_of_content_owner: Option<&'a str>,
+
+    page_token: Option<&'a str>,
+
+    region_code: Option<&'a str>,
+
+    video_category_id: Option<&'a str>,
+}
+
+impl DataApi for VideoList<'_> {
+    fn api_path(&self) -> &str {
+        "/videos"
+    }
+}
+
+#[async_trait]
+impl ListApi<VideoListResponse> for VideoList<'_> {
+    async fn request(&self) -> Result<VideoListResponse> {
+        todo!()
+    }
+}
+
+impl<'a> VideoList<'a> {
+    pub fn new(service: &'a VideosService, part: Vec<Part>) -> Self {
+        let part = if part.is_empty() {
+            vec![Part::Id]
+        } else {
+            part
+        };
+        Self {
+            service,
+            part,
+            chart: None,
+            id: None,
+            my_rating: None,
+            hl: None,
+            max_height: None,
+            max_results: None,
+            max_width: None,
+            on_behalf_of_content_owner: None,
+            page_token: None,
+            region_code: None,
+            video_category_id: None,
+        }
+    }
+
+    pub fn part(&mut self, part: Vec<Part>) -> &mut Self {
+        self.part = part;
+        self
+    }
+
+    pub fn chart(&mut self, chart: &'a str) -> &mut Self {
+        self.chart = Some(chart);
+        self
+    }
+
+    pub fn id(&mut self, id: &'a str) -> &mut Self {
+        self.id = Some(id);
+        self
+    }
+
+    pub fn my_rating(&mut self, my_rating: MyRating) -> &mut Self {
+        self.my_rating = Some(my_rating);
+        self
+    }
+
+    pub fn hl(&mut self, hl: &'a str) -> &mut Self {
+        self.hl = Some(hl);
+        self
+    }
+
+    pub fn max_height(&mut self, max_height: u32) -> &mut Self {
+        let max_height = if max_height > 4320 {
+            4320
+        } else if max_height < 72 {
+            72
+        } else {
+            max_height
+        };
+        self.max_height = Some(max_height);
+        self
+    }
+
+    pub fn max_results(&mut self, max_results: u32) -> &mut Self {
+        let max_results = if max_results > 50 { 50 } else { max_results };
+        self.max_results = Some(max_results);
+        self
+    }
+
+    pub fn max_width(&mut self, max_width: u32) -> &mut Self {
+        let max_width = if max_width > 8192 {
+            8192
+        } else if max_width < 72 {
+            72
+        } else {
+            max_width
+        };
+        self.max_width = Some(max_width);
+        self
+    }
+
+    pub fn on_behalf_of_content_owner(&mut self, on_behalf_of_content_owner: &'a str) -> &mut Self {
+        self.on_behalf_of_content_owner = Some(on_behalf_of_content_owner);
+        self
+    }
+
+    pub fn page_token(&mut self, page_token: &'a str) -> &mut Self {
+        self.page_token = Some(page_token);
+        self
+    }
+
+    pub fn region_code(&mut self, region_code: &'a str) -> &mut Self {
+        self.region_code = Some(region_code);
+        self
+    }
+
+    pub fn video_category_id(&mut self, video_category_id: &'a str) -> &mut Self {
+        self.video_category_id = Some(video_category_id);
+        self
+    }
+}
+
+pub enum Part {
+    ContentDetails,
+
+    FileDetails,
+
+    Id,
+
+    LiveStreamingDetails,
+
+    Localizations,
+
+    Player,
+
+    ProcessingDetails,
+
+    RecordingDetails,
+
+    Snippet,
+
+    Statistics,
+
+    Status,
+
+    Suggestions,
+
+    TopicDetails,
+}
+
+impl std::fmt::Display for Part {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let part = match self {
+            Part::ContentDetails => "contentDetails",
+            Part::FileDetails => "fileDetails",
+            Part::Id => "id",
+            Part::LiveStreamingDetails => "liveStreamingDetails",
+            Part::Localizations => "localizations",
+            Part::Player => "player",
+            Part::ProcessingDetails => "processingDetails",
+            Part::RecordingDetails => "recordingDetails",
+            Part::Snippet => "snippet",
+            Part::Statistics => "statistics",
+            Part::Status => "status",
+            Part::Suggestions => "suggestions",
+            Part::TopicDetails => "topicDetails",
+        };
+        write!(f, "{}", part)
+    }
+}
+
+pub enum MyRating {
+    /// Returns only videos disliked by the authenticated user.
+    Dislike,
+
+    /// Returns only videos liked by the authenticated user.
+    Like,
+}
+
+impl std::fmt::Display for MyRating {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let my_rating = match self {
+            MyRating::Dislike => "dislike",
+            MyRating::Like => "like",
+        };
+        write!(f, "{}", my_rating)
+    }
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct VideoListResource {
@@ -193,7 +422,7 @@ pub struct VideoStatus {
     pub embeddable: bool,
 
     /// This value indicates whether the extended video statistics on the video's watch page are publicly viewable.
-    /// By default, those statistics are viewable, and statistics like a video's viewcount and ratings will still be
+    /// By default, those statistics are viewable, and statistics like a video's view count and ratings will still be
     /// publicly visible even if this property's value is set to false.
     #[serde(alias = "publicStatsViewable")]
     pub public_stats_viewable: bool,
@@ -289,7 +518,7 @@ pub struct VideoLiveStreamingDetails {
     pub scheduled_end_time: Option<DateTime<Utc>>,
 
     /// The number of viewers currently watching the broadcast. The property and its value will be present if the broadcast
-    /// has current viewers and the broadcast owner has not hidden the viewcount for the video. Note that YouTube stops tracking
+    /// has current viewers and the broadcast owner has not hidden the view count for the video. Note that YouTube stops tracking
     /// the number of concurrent viewers for a broadcast when the broadcast ends. So, this property would not identify
     /// the number of viewers watching an archived video of a live broadcast that already ended.
     ///
@@ -305,3 +534,6 @@ pub struct VideoLiveStreamingDetails {
     #[serde(alias = "activeLiveChatId")]
     pub active_live_chat_id: Option<String>,
 }
+
+#[cfg(test)]
+mod tests {}
