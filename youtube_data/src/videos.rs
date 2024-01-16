@@ -1,5 +1,5 @@
 use crate::{
-    DataApi, ListApi, ListResponse, Localization, Result, Thumbnail, ThumbnailKind, YouTube,
+    DataApi, Error, ListApi, ListResponse, Localization, Result, Thumbnail, ThumbnailKind, YouTube,
 };
 
 use async_trait::async_trait;
@@ -31,27 +31,18 @@ struct VideoList<'a> {
     part: Vec<Part>,
 
     // filters (specify exactly one of the following parameters)
-    chart: Option<&'a str>,
-
-    id: Option<&'a str>,
-
+    chart: Option<Chart>,
+    id: Option<Vec<&'a str>>,
     my_rating: Option<MyRating>,
 
     // optional parameters
     hl: Option<&'a str>,
-
     max_height: Option<u32>,
-
     max_results: Option<u32>,
-
     max_width: Option<u32>,
-
     on_behalf_of_content_owner: Option<&'a str>,
-
     page_token: Option<&'a str>,
-
     region_code: Option<&'a str>,
-
     video_category_id: Option<&'a str>,
 }
 
@@ -64,7 +55,75 @@ impl DataApi for VideoList<'_> {
 #[async_trait]
 impl ListApi<VideoListResponse> for VideoList<'_> {
     async fn request(&self) -> Result<VideoListResponse> {
-        todo!()
+        let youtube = &self.service.youtube;
+
+        // createquery parameter map
+        let mut params = HashMap::<String, String>::new();
+
+        // key
+        self.insert_query_parameter(&mut params, "key", Some(&youtube.api_key));
+
+        // required parameters
+        self.insert_query_parameters(&mut params, "part", Some(&self.part));
+
+        // filter
+        let filters = vec![
+            self.chart.is_some(),
+            self.id.is_some(),
+            self.my_rating.is_some(),
+        ]
+        .into_iter()
+        .filter(|&x| x)
+        .count();
+        // filter must be specified exactly one
+        if filters == 1 {
+            if let Some(chart) = &self.chart {
+                self.insert_query_parameter(&mut params, "chart", Some(chart));
+                self.insert_query_parameter(&mut params, "videoCategoryId", self.video_category_id);
+            }
+            if let Some(id) = &self.id {
+                if id.is_empty() {
+                    return Err(Error::InvalidParameter);
+                }
+                self.insert_query_parameters(&mut params, "id", Some(&id));
+            }
+            // TODO: check if the user is authenticated
+            if let Some(_my_rating) = &self.my_rating {
+                return Err(Error::NotAuthorized);
+                // self.insert_query_parameter(&mut params, "myRating", Some(my_rating));
+            }
+        } else {
+            return if filters > 1 {
+                // specify exactly one of the following parameters: chart, id, myRating
+                Err(Error::InvalidParameter)
+            } else {
+                // specify one of the following parameters: chart, id, myRating
+                Err(Error::InvalidParameter)
+            };
+        }
+
+        // optional parameters
+        self.insert_query_parameter(&mut params, "hl", self.hl);
+        self.insert_query_parameter(&mut params, "maxHeight", self.max_height);
+        self.insert_query_parameter(&mut params, "maxResults", self.max_results);
+        self.insert_query_parameter(&mut params, "maxWidth", self.max_width);
+        if self.on_behalf_of_content_owner.is_some() {
+            // This parameter is intended exclusively for YouTube content partners.
+            return Err(Error::NotAuthorized);
+        }
+        self.insert_query_parameter(&mut params, "pageToken", self.page_token);
+        self.insert_query_parameter(&mut params, "regionCode", self.region_code);
+
+        Ok(youtube
+            .client
+            .get(self.url(&youtube.base_path))
+            .query(&params)
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap())
     }
 }
 
@@ -97,12 +156,12 @@ impl<'a> VideoList<'a> {
         self
     }
 
-    pub fn chart(&mut self, chart: &'a str) -> &mut Self {
+    pub fn chart(&mut self, chart: Chart) -> &mut Self {
         self.chart = Some(chart);
         self
     }
 
-    pub fn id(&mut self, id: &'a str) -> &mut Self {
+    pub fn id(&mut self, id: Vec<&'a str>) -> &mut Self {
         self.id = Some(id);
         self
     }
@@ -214,6 +273,20 @@ impl std::fmt::Display for Part {
             Part::TopicDetails => "topicDetails",
         };
         write!(f, "{}", part)
+    }
+}
+
+pub enum Chart {
+    /// Returns the most popular videos for the specified content region and video category.
+    MostPopular,
+}
+
+impl std::fmt::Display for Chart {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let chart = match self {
+            Chart::MostPopular => "mostPopular",
+        };
+        write!(f, "{}", chart)
     }
 }
 
@@ -536,4 +609,106 @@ pub struct VideoLiveStreamingDetails {
 }
 
 #[cfg(test)]
-mod tests {}
+mod tests {
+    use super::*;
+    use crate::get_develop_key;
+
+    #[tokio::test]
+    #[should_panic]
+    async fn test_request_without_filter() {
+        let youtube = YouTube::new(get_develop_key(), None);
+
+        let _ = youtube
+            .videos()
+            .list(vec![Part::Snippet])
+            .request()
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    #[should_panic]
+    async fn test_request_multiple_filters() {
+        let youtube = YouTube::new(get_develop_key(), None);
+
+        let _ = youtube
+            .videos()
+            .list(vec![Part::Snippet])
+            .chart(Chart::MostPopular)
+            .id(vec!["Ks-_Mh1QhMc", "c0KYU2j0TM4", "eIho2S0ZahI"])
+            .request()
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_get_by_id() {
+        let youtube = YouTube::new(get_develop_key(), None);
+
+        let response = youtube
+            .videos()
+            .list(vec![Part::Snippet])
+            .id(vec!["Ks-_Mh1QhMc"])
+            .request()
+            .await
+            .unwrap();
+        println!("{:#?}", response);
+
+        assert_eq!(response.items.len(), 1);
+        assert_eq!(response.items[0].id, "Ks-_Mh1QhMc");
+    }
+
+    #[tokio::test]
+    async fn test_get_by_multiple_ids() {
+        let youtube = YouTube::new(get_develop_key(), None);
+
+        let response = youtube
+            .videos()
+            .list(vec![Part::Snippet])
+            .id(vec!["Ks-_Mh1QhMc", "c0KYU2j0TM4", "eIho2S0ZahI"])
+            .request()
+            .await
+            .unwrap();
+        println!("{:#?}", response);
+
+        assert_eq!(response.items.len(), 3);
+        assert_eq!(response.items[0].id, "Ks-_Mh1QhMc");
+        assert_eq!(response.items[1].id, "c0KYU2j0TM4");
+        assert_eq!(response.items[2].id, "eIho2S0ZahI");
+    }
+
+    #[tokio::test]
+    async fn test_get_most_popular_videos() {
+        let youtube = YouTube::new(get_develop_key(), None);
+
+        let response = youtube
+            .videos()
+            .list(vec![Part::Snippet])
+            .chart(Chart::MostPopular)
+            .max_results(10)
+            .request()
+            .await
+            .unwrap();
+        println!("{:#?}", response);
+        assert_eq!(response.items.len(), 10);
+    }
+
+    /// this test is ignored because live videos might be not "upcoming" or "active" at the time of testing
+    #[ignore]
+    #[tokio::test]
+    async fn test_get_upcoming_live_videos() {
+        let youtube = YouTube::new(get_develop_key(), None);
+
+        let response = youtube
+            .videos()
+            .list(vec![Part::Snippet, Part::LiveStreamingDetails])
+            .id(vec!["wPXfKeWU2YE"])
+            .request()
+            .await
+            .unwrap();
+        println!("{:#?}", response);
+
+        assert_eq!(response.items.len(), 1);
+        assert_eq!(response.items[0].id, "wPXfKeWU2YE");
+    }
+}
