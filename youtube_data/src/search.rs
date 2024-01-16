@@ -1,4 +1,4 @@
-use crate::{DataApi, ListApi, ListResponse, Result, Thumbnail, ThumbnailKind, YouTube};
+use crate::{DataApi, Error, ListApi, ListResponse, Result, Thumbnail, ThumbnailKind, YouTube};
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -52,8 +52,9 @@ struct SearchList<'a> {
     relevance_language: Option<&'a str>,
     safe_search: Option<SafeSearch>,
     topic_id: Option<&'a str>,
-    /// The actual parameter name is `type`, but `type` is a keyword in Rust.
-    resource_type: Option<Vec<ResourceType>>,
+    /// The actual parameter name is `type`, but `type` is a keyword in Rust. and this parameter is optional but
+    /// provides a default value as it is used as a prerequisite for may other parameters.
+    resource_type: Vec<ResourceType>,
     video_caption: Option<VideoCaption>,
     video_category_id: Option<&'a str>,
     video_definition: Option<VideoDefinition>,
@@ -75,7 +76,226 @@ impl DataApi for SearchList<'_> {
 #[async_trait]
 impl ListApi<SearchListResponse> for SearchList<'_> {
     async fn request(&self) -> Result<SearchListResponse> {
-        todo!()
+        let youtube = &self.service.youtube;
+
+        // createquery parameter map
+        let mut params = HashMap::<String, String>::new();
+
+        // key
+        self.insert_query_parameter(&mut params, "key", Some(&youtube.api_key));
+
+        // required parameters
+        self.insert_query_parameters(&mut params, "part", Some(&self.part));
+        let has_video_type_only =
+            self.resource_type.len() == 1 && self.resource_type[0] == ResourceType::Video;
+
+        // filter
+        let filters = vec![
+            self.for_content_owner.is_some(),
+            self.for_developer.is_some(),
+            self.for_mine.is_some(),
+        ]
+        .into_iter()
+        .filter(|x| *x)
+        .count();
+        // filter must be 0 or 1
+        if filters > 1 {
+            return Err(Error::InvalidParameter);
+        }
+        if filters == 1 {
+            // TODO: check if the user is authenticated
+            if let Some(_for_content_owner) = self.for_content_owner {
+                return Err(Error::NotAuthorized);
+                // // required parameter.
+                // if self.on_behalf_of_content_owner.is_none() {
+                //     return Err(Error::InvalidParameter);
+                // }
+                //
+                // // must be set to video.
+                // if !has_video_type_only {
+                //     return Err(Error::InvalidParameter);
+                // }
+                //
+                // // must be using an account linked to the specified content owner.
+                //
+                // // the following parameters are not available: video_definition, video_dimension, video_duration,
+                // // video_embeddable, video_license, video_syndicated, video_type.
+                //
+                // self.insert_query_parameter(
+                //     &mut params,
+                //     "forContentOwner",
+                //     Some(for_content_owner),
+                // );
+            }
+            if let Some(_for_developer) = self.for_developer {
+                return Err(Error::NotAuthorized);
+                // self.insert_query_parameter(&mut params, "forDeveloper", Some(for_developer));
+            }
+            if let Some(_for_mine) = self.for_mine {
+                return Err(Error::NotAuthorized);
+                // // must be set to video.
+                // if !has_video_type_only {
+                //     return Err(Error::InvalidParameter);
+                // }
+                //
+                // // the following parameters are not available: video_definition, video_dimension, video_duration,
+                // // video_embeddable, video_license, video_syndicated, video_type.
+                //
+                // self.insert_query_parameter(&mut params, "forMine", Some(for_mine));
+            }
+        }
+
+        // optional parameters
+        self.insert_query_parameter(&mut params, "channelId", self.channel_id);
+        self.insert_query_parameter(&mut params, "channelType", self.channel_type.as_ref());
+        if self.event_type.is_some() {
+            // must be set to video.
+            if !has_video_type_only {
+                return Err(Error::InvalidParameter);
+            }
+
+            self.insert_query_parameter(&mut params, "eventType", self.event_type.as_ref());
+        }
+        if self.location.is_some() {
+            // must be set to video.
+            if !has_video_type_only {
+                return Err(Error::InvalidParameter);
+            }
+
+            // must also set the locationRadius parameter's value.
+            if !self.location_radius.is_none() {
+                return Err(Error::InvalidParameter);
+            }
+
+            self.insert_query_parameter(&mut params, "location", self.location);
+        }
+        self.insert_query_parameter(&mut params, "maxResults", self.max_results);
+        self.insert_query_parameter(&mut params, "order", self.order.as_ref());
+        self.insert_query_parameter(&mut params, "pageToken", self.page_token);
+        self.insert_date_time_query_parameter(&mut params, "publishedAfter", self.published_after);
+        self.insert_date_time_query_parameter(
+            &mut params,
+            "publishedBefore",
+            self.published_before,
+        );
+        self.insert_query_parameter(&mut params, "q", self.q);
+        self.insert_query_parameter(&mut params, "regionCode", self.region_code);
+        self.insert_query_parameter(&mut params, "relevanceLanguage", self.relevance_language);
+        self.insert_query_parameter(&mut params, "safeSearch", self.safe_search.as_ref());
+        self.insert_query_parameter(&mut params, "topicId", self.topic_id);
+        self.insert_query_parameters(&mut params, "type", Some(&self.resource_type));
+        if self.video_caption.is_some() {
+            // must be set to video.
+            if !has_video_type_only {
+                return Err(Error::InvalidParameter);
+            }
+
+            self.insert_query_parameter(&mut params, "videoCaption", self.video_caption.as_ref());
+        }
+
+        if self.video_category_id.is_some() {
+            // must be set to video.
+            if !has_video_type_only {
+                return Err(Error::InvalidParameter);
+            }
+
+            self.insert_query_parameter(&mut params, "videoCategoryId", self.video_category_id);
+        }
+        if self.video_definition.is_some() {
+            // must be set to video.
+            if !has_video_type_only {
+                return Err(Error::InvalidParameter);
+            }
+
+            self.insert_query_parameter(
+                &mut params,
+                "videoDefinition",
+                self.video_definition.as_ref(),
+            );
+        }
+        if self.video_dimension.is_some() {
+            // must be set to video.
+            if !has_video_type_only {
+                return Err(Error::InvalidParameter);
+            }
+
+            self.insert_query_parameter(
+                &mut params,
+                "videoDimension",
+                self.video_dimension.as_ref(),
+            );
+        }
+        if self.video_duration.is_some() {
+            // must be set to video.
+            if !has_video_type_only {
+                return Err(Error::InvalidParameter);
+            }
+
+            self.insert_query_parameter(&mut params, "videoDuration", self.video_duration.as_ref());
+        }
+        if self.video_embeddable.is_some() {
+            // must be set to video.
+            if !has_video_type_only {
+                return Err(Error::InvalidParameter);
+            }
+
+            self.insert_query_parameter(
+                &mut params,
+                "videoEmbeddable",
+                self.video_embeddable.as_ref(),
+            );
+        }
+        if self.video_license.is_some() {
+            // must be set to video.
+            if !has_video_type_only {
+                return Err(Error::InvalidParameter);
+            }
+
+            self.insert_query_parameter(&mut params, "videoLicense", self.video_license.as_ref());
+        }
+        if self.video_paid_product_placement.is_some() {
+            // must be set to video.
+            if !has_video_type_only {
+                return Err(Error::InvalidParameter);
+            }
+
+            self.insert_query_parameter(
+                &mut params,
+                "videoPaidProductPlacement",
+                self.video_paid_product_placement.as_ref(),
+            );
+        }
+        if self.video_syndicated.is_some() {
+            // must be set to video.
+            if !has_video_type_only {
+                return Err(Error::InvalidParameter);
+            }
+
+            self.insert_query_parameter(
+                &mut params,
+                "videoSyndicated",
+                self.video_syndicated.as_ref(),
+            );
+        }
+        if self.video_type.is_some() {
+            // must be set to video.
+            if !has_video_type_only {
+                return Err(Error::InvalidParameter);
+            }
+
+            self.insert_query_parameter(&mut params, "videoType", self.video_type.as_ref());
+        }
+
+        Ok(youtube
+            .client
+            .get(self.url(&youtube.base_path))
+            .query(&params)
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap())
     }
 }
 
@@ -108,7 +328,11 @@ impl<'a> SearchList<'a> {
             relevance_language: None,
             safe_search: None,
             topic_id: None,
-            resource_type: None,
+            resource_type: vec![
+                ResourceType::Channel,
+                ResourceType::Playlist,
+                ResourceType::Video,
+            ],
             video_caption: None,
             video_category_id: None,
             video_definition: None,
@@ -224,7 +448,7 @@ impl<'a> SearchList<'a> {
     }
 
     pub fn resource_type(&mut self, resource_type: Vec<ResourceType>) -> &mut Self {
-        self.resource_type = Some(resource_type);
+        self.resource_type = resource_type;
         self
     }
 
@@ -299,6 +523,7 @@ impl std::fmt::Display for Part {
 }
 
 /// The channelType parameter lets you restrict a search to a particular type of channel.
+#[derive(Clone)]
 pub enum ChannelType {
     /// Return all channels.
     Any,
@@ -407,6 +632,7 @@ impl std::fmt::Display for SafeSearch {
 
 /// The type parameter restricts a search query to only retrieve a particular type of resource. The value is a
 /// comma-separated list of resource types. The default value is `video,channel,playlist`.
+#[derive(PartialEq)]
 pub enum ResourceType {
     Channel,
 
@@ -574,6 +800,17 @@ pub enum VideoPaidProductPlacement {
     True,
 }
 
+impl std::fmt::Display for VideoPaidProductPlacement {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let str = match self {
+            VideoPaidProductPlacement::Any => "any",
+            VideoPaidProductPlacement::True => "true",
+        }
+        .to_string();
+        write!(f, "{}", str)
+    }
+}
+
 pub enum VideoSyndicated {
     /// Return all syndicated videos.
     Any,
@@ -694,4 +931,62 @@ pub struct SearchSnippet {
 }
 
 #[cfg(test)]
-mod tests {}
+mod tests {
+    use super::*;
+    use crate::get_develop_key;
+
+    // search list api test will be ignored because it has a quota cost of 100 units per call.
+
+    #[ignore]
+    #[tokio::test]
+    async fn test_search_list_by_keyword() {
+        let youtube = YouTube::new(get_develop_key(), None);
+
+        let response = youtube
+            .search()
+            .list(vec![Part::Snippet])
+            .q("surfing")
+            .max_results(1)
+            .request()
+            .await
+            .unwrap();
+        println!("{:#?}", response);
+        assert_eq!(response.items.len(), 1);
+    }
+
+    #[ignore]
+    #[tokio::test]
+    async fn test_search_list_by_live_events() {
+        let youtube = YouTube::new(get_develop_key(), None);
+
+        let response = youtube
+            .search()
+            .list(vec![Part::Snippet])
+            .event_type(EventType::Live)
+            .resource_type(vec![ResourceType::Video])
+            .q("news")
+            .max_results(1)
+            .request()
+            .await
+            .unwrap();
+        println!("{:#?}", response);
+        assert_eq!(response.items.len(), 1);
+    }
+
+    #[ignore]
+    #[tokio::test]
+    async fn test_search_list_channels_by_q() {
+        let youtube = YouTube::new(get_develop_key(), None);
+
+        let response = youtube
+            .search()
+            .list(vec![Part::Id])
+            .resource_type(vec![ResourceType::Channel])
+            .q("@alicemana3910")
+            .request()
+            .await
+            .unwrap();
+        println!("{:#?}", response);
+        assert_ne!(response.items.len(), 0);
+    }
+}
