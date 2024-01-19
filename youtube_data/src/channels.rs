@@ -383,7 +383,8 @@ mod tests {
             .await;
         assert_eq!(true, invalid_id.is_err());
         let err = invalid_id.unwrap_err();
-        let assert_message = concat!("client error: 400 Bad Request status: \"INVALID_ARGUMENT\" ", 
+        let assert_message = concat!("client error for url (\"/youtube/v3/channels?id=UC_x5XG1OV2P6uZZ5FSM9Ttw日本語한국어English&key=[API_KEY]&part=snippet\"): ",
+        "400 Bad Request status: \"INVALID_ARGUMENT\" ",
         "message: \"Request contains an invalid argument.\" ", 
         "[message: \"Request contains an invalid argument.\", domain: \"global\", reason: \"badRequest\"]");
         assert_eq!(assert_message, format!("{}", err));

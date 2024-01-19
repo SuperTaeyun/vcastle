@@ -139,8 +139,10 @@ pub(crate) trait YouTubeDataApi: RequestBase {
             panic!("Redirection Responses");
         }
         if status.is_client_error() {
+            let url = response.url().clone();
             return Err(error::Error::client_error(
                 response.json::<error::YouTubeError>().await?,
+                url,
             ));
         } else {
             // TODO: implement a handle for the server error status code

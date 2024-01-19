@@ -1,4 +1,5 @@
 use http::StatusCode;
+use reqwest::Url;
 use std::{error::Error as StdError, fmt};
 use thiserror::Error;
 
@@ -14,12 +15,16 @@ pub struct Error(#[from] ErrorRepr);
 impl From<reqwest::Error> for Error {
     #[cfg(not(debug_assertions))]
     fn from(value: reqwest::Error) -> Self {
-        Error::new(ErrorKind::ReqwestError, Some(value.without_url()))
+        Error::new(
+            ErrorKind::ReqwestError,
+            Some(value.without_url()),
+            None::<Url>,
+        )
     }
 
     #[cfg(debug_assertions)]
     fn from(value: reqwest::Error) -> Self {
-        Error::new(ErrorKind::ReqwestError, Some(value))
+        Error::new(ErrorKind::ReqwestError, Some(value), None::<Url>)
     }
 }
 
@@ -40,7 +45,7 @@ impl fmt::Debug for Error {
 }
 
 impl Error {
-    pub(crate) fn new<E>(kind: ErrorKind, source: Option<E>) -> Error
+    pub(crate) fn new<E>(kind: ErrorKind, source: Option<E>, url: Option<Url>) -> Error
     where
         E: Into<BoxError>,
     {
@@ -48,6 +53,7 @@ impl Error {
             0: ErrorRepr {
                 kind,
                 source: source.map(Into::into),
+                url: replace_sensitive_query_params(url),
             },
         }
     }
@@ -58,6 +64,7 @@ impl Error {
                 message: message.into(),
             }),
             None::<Error>,
+            None::<Url>,
         )
     }
 
@@ -67,6 +74,7 @@ impl Error {
                 message: message.into(),
             }),
             None::<Error>,
+            None::<Url>,
         )
     }
 
@@ -76,6 +84,7 @@ impl Error {
                 message: message.into(),
             }),
             None::<Error>,
+            None::<Url>,
         )
     }
 
@@ -85,11 +94,12 @@ impl Error {
                 message: message.into(),
             }),
             None::<Error>,
+            None::<Url>,
         )
     }
 
-    pub(crate) fn client_error(source: YouTubeError) -> Error {
-        Error::new(ErrorKind::ClientError, Some(source))
+    pub(crate) fn client_error(source: YouTubeError, url: Url) -> Error {
+        Error::new(ErrorKind::ClientError, Some(source), Some(url))
     }
 }
 
@@ -97,6 +107,8 @@ impl Error {
 struct ErrorRepr {
     kind: ErrorKind,
     source: Option<BoxError>,
+    /// The URL (path and queries, to be exact) of the request that caused the error.
+    url: Option<String>,
 }
 
 impl fmt::Display for ErrorRepr {
@@ -128,6 +140,10 @@ impl fmt::Display for ErrorRepr {
             ErrorKind::ReqwestError => {
                 f.write_str("reqwest error")?;
             }
+        }
+
+        if let Some(url) = &self.url {
+            write!(f, " for url (\"{}\")", url)?;
         }
 
         if let Some(e) = &self.source {
@@ -261,9 +277,34 @@ impl fmt::Display for YouTubeErrorDetail {
     }
 }
 
+fn replace_sensitive_query_params(url: Option<Url>) -> Option<String> {
+    if url.is_none() {
+        return None;
+    }
+    let url = url.unwrap();
+    let path = url.path().to_string();
+    let queries = url.query_pairs();
+    // replace sensitive query params
+    let mut queries = queries
+        .map(|(key, val)| {
+            return if key != "key" {
+                format!("{}={}", key, val)
+            } else {
+                format!("{}={}", key, "[API_KEY]")
+            };
+        })
+        .collect::<Vec<String>>();
+    // if you do not sort, the results will be different every time
+    queries.sort();
+    let queries = queries.join("&");
+    // concat path and queries
+    Some(format!("{}?{}", path, queries))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::get_develop_key;
 
     const YOUTUBE_ERROR_JSON: &str = r#"
     {
@@ -299,12 +340,36 @@ mod tests {
             "builder error: \"No filter selected. Expected one of: for_username, id, managed_by_me, mine\""
         );
 
-        let client_error = Error::client_error(serde_json::from_str(YOUTUBE_ERROR_JSON).unwrap());
+        let client_error = Error::client_error(
+            serde_json::from_str(YOUTUBE_ERROR_JSON).unwrap(),
+            Url::parse("https://www.youtube.com").unwrap(),
+        );
         let assert_message = concat!("client error: 400 Bad Request message: \"No filter selected.", 
         " Expected one of: for_username, id, managed_by_me, mine\"",
         " [message: \"No filter selected. Expected one of: for_username, id, managed_by_me, mine\",",
         " domain: \"youtube.parameter\", reason: \"missingRequiredParameter\"]"
         );
         assert_eq!(format!("{}", client_error), assert_message);
+    }
+
+    #[test]
+    fn test_replace_sensitive_query_params() {
+        let binnding = reqwest::Client::new()
+            .get("https://www.googleapis.com/youtube/v3/channels")
+            .query(&[
+                ("part", "snippet"),
+                ("id", "UC_x5XG1OV2P6uZZ5FSM9Ttw"),
+                ("key", &get_develop_key()),
+            ])
+            .build()
+            .unwrap();
+        let url = binnding.url();
+        let replaced_url = replace_sensitive_query_params(Some(url.clone()));
+        assert!(replaced_url.is_some());
+        let replaced_url = replaced_url.unwrap();
+        assert_eq!(
+            replaced_url,
+            "/youtube/v3/channels?id=UC_x5XG1OV2P6uZZ5FSM9Ttw&key=[API_KEY]&part=snippet"
+        );
     }
 }
