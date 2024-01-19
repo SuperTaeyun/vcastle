@@ -1,4 +1,7 @@
-use crate::{DataApi, Error, ListApi, ListResponse, Result, Thumbnail, ThumbnailKind, YouTube};
+use crate::{
+    error::{Error, Result},
+    ListApi, ListResponse, RequestBase, Thumbnail, ThumbnailKind, YouTube, YouTubeDataApi,
+};
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -67,11 +70,14 @@ struct SearchList<'a> {
     video_type: Option<VideoType>,
 }
 
-impl DataApi for SearchList<'_> {
+impl RequestBase for SearchList<'_> {
     fn api_path(&self) -> &str {
         "search"
     }
 }
+
+#[async_trait]
+impl YouTubeDataApi for SearchList<'_> {}
 
 #[async_trait]
 impl ListApi<SearchListResponse> for SearchList<'_> {
@@ -96,31 +102,54 @@ impl ListApi<SearchListResponse> for SearchList<'_> {
             self.for_mine.is_some(),
         ]
         .into_iter()
-        .filter(|x| *x)
-        .count();
+        .filter(|x| *x);
+        let count = filters.clone().count();
+
         // filter must be 0 or 1
-        if filters > 1 {
-            return Err(Error::InvalidParameter);
+        if count > 1 {
+            let imcompatible_params = filters
+                .into_iter()
+                .enumerate()
+                .filter(|(_, v)| *v)
+                .map(|(i, _)| match i {
+                    0 => "for_content_owner",
+                    1 => "for_developer",
+                    2 => "for_mine",
+                    _ => "",
+                })
+                .collect::<Vec<&str>>()
+                .join(", ");
+            return Err(Error::incompatible_parameters(format!(
+                "Incompatible parameters specified in the request: {}",
+                imcompatible_params,
+            )));
         }
-        if filters == 1 {
+        if count == 1 {
             // TODO: check if the user is authenticated
             if let Some(_for_content_owner) = self.for_content_owner {
-                return Err(Error::NotAuthorized);
+                return Err(Error::authorization_required(
+                    "The request uses the `for_content_owner` parameter but is not properly authorized",
+                ));
                 // // required parameter.
                 // if self.on_behalf_of_content_owner.is_none() {
-                //     return Err(Error::InvalidParameter);
+                //     let additional_message =
+                //         "parameter `on_behalf_of_content_owner` is required when using filter `for_content_owner`";
+                //     return Err(Error::invalid_parameter(format!(
+                //         "Request contains an invalid argument: {}",
+                //         additional_message
+                //     )));
                 // }
-                //
+
                 // // must be set to video.
                 // if !has_video_type_only {
-                //     return Err(Error::InvalidParameter);
+                //     return Err(type_must_set_be_video("video_duration"));
                 // }
-                //
+
                 // // must be using an account linked to the specified content owner.
-                //
+
                 // // the following parameters are not available: video_definition, video_dimension, video_duration,
                 // // video_embeddable, video_license, video_syndicated, video_type.
-                //
+
                 // self.insert_query_parameter(
                 //     &mut params,
                 //     "forContentOwner",
@@ -128,14 +157,18 @@ impl ListApi<SearchListResponse> for SearchList<'_> {
                 // );
             }
             if let Some(_for_developer) = self.for_developer {
-                return Err(Error::NotAuthorized);
+                return Err(Error::authorization_required(
+                    "The request uses the `for_developer` parameter but is not properly authorized",
+                ));
                 // self.insert_query_parameter(&mut params, "forDeveloper", Some(for_developer));
             }
             if let Some(_for_mine) = self.for_mine {
-                return Err(Error::NotAuthorized);
+                return Err(Error::authorization_required(
+                    "The request uses the `for_mine` parameter but is not properly authorized",
+                ));
                 // // must be set to video.
                 // if !has_video_type_only {
-                //     return Err(Error::InvalidParameter);
+                //     return Err(type_must_set_be_video("for_mine"));
                 // }
                 //
                 // // the following parameters are not available: video_definition, video_dimension, video_duration,
@@ -151,22 +184,24 @@ impl ListApi<SearchListResponse> for SearchList<'_> {
         if self.event_type.is_some() {
             // must be set to video.
             if !has_video_type_only {
-                return Err(Error::InvalidParameter);
+                return Err(type_must_set_be_video("event_type"));
             }
-
             self.insert_query_parameter(&mut params, "eventType", self.event_type.as_ref());
         }
         if self.location.is_some() {
             // must be set to video.
             if !has_video_type_only {
-                return Err(Error::InvalidParameter);
+                return Err(type_must_set_be_video("location"));
             }
-
             // must also set the locationRadius parameter's value.
             if !self.location_radius.is_none() {
-                return Err(Error::InvalidParameter);
+                let additional_message =
+                    "parameter `location_radius` must be specified when using `location`";
+                return Err(Error::invalid_parameter(format!(
+                    "Request contains an invalid argument: {}",
+                    additional_message
+                )));
             }
-
             self.insert_query_parameter(&mut params, "location", self.location);
         }
         self.insert_query_parameter(&mut params, "maxResults", self.max_results);
@@ -187,26 +222,23 @@ impl ListApi<SearchListResponse> for SearchList<'_> {
         if self.video_caption.is_some() {
             // must be set to video.
             if !has_video_type_only {
-                return Err(Error::InvalidParameter);
+                return Err(type_must_set_be_video("video_caption"));
             }
-
             self.insert_query_parameter(&mut params, "videoCaption", self.video_caption.as_ref());
         }
 
         if self.video_category_id.is_some() {
             // must be set to video.
             if !has_video_type_only {
-                return Err(Error::InvalidParameter);
+                return Err(type_must_set_be_video("video_category_id"));
             }
-
             self.insert_query_parameter(&mut params, "videoCategoryId", self.video_category_id);
         }
         if self.video_definition.is_some() {
             // must be set to video.
             if !has_video_type_only {
-                return Err(Error::InvalidParameter);
+                return Err(type_must_set_be_video("video_definition"));
             }
-
             self.insert_query_parameter(
                 &mut params,
                 "videoDefinition",
@@ -216,9 +248,8 @@ impl ListApi<SearchListResponse> for SearchList<'_> {
         if self.video_dimension.is_some() {
             // must be set to video.
             if !has_video_type_only {
-                return Err(Error::InvalidParameter);
+                return Err(type_must_set_be_video("video_dimension"));
             }
-
             self.insert_query_parameter(
                 &mut params,
                 "videoDimension",
@@ -228,17 +259,15 @@ impl ListApi<SearchListResponse> for SearchList<'_> {
         if self.video_duration.is_some() {
             // must be set to video.
             if !has_video_type_only {
-                return Err(Error::InvalidParameter);
+                return Err(type_must_set_be_video("video_duration"));
             }
-
             self.insert_query_parameter(&mut params, "videoDuration", self.video_duration.as_ref());
         }
         if self.video_embeddable.is_some() {
             // must be set to video.
             if !has_video_type_only {
-                return Err(Error::InvalidParameter);
+                return Err(type_must_set_be_video("video_embeddable"));
             }
-
             self.insert_query_parameter(
                 &mut params,
                 "videoEmbeddable",
@@ -248,17 +277,15 @@ impl ListApi<SearchListResponse> for SearchList<'_> {
         if self.video_license.is_some() {
             // must be set to video.
             if !has_video_type_only {
-                return Err(Error::InvalidParameter);
+                return Err(type_must_set_be_video("video_license"));
             }
-
             self.insert_query_parameter(&mut params, "videoLicense", self.video_license.as_ref());
         }
         if self.video_paid_product_placement.is_some() {
             // must be set to video.
             if !has_video_type_only {
-                return Err(Error::InvalidParameter);
+                return Err(type_must_set_be_video("video_paid_product_placement"));
             }
-
             self.insert_query_parameter(
                 &mut params,
                 "videoPaidProductPlacement",
@@ -268,9 +295,8 @@ impl ListApi<SearchListResponse> for SearchList<'_> {
         if self.video_syndicated.is_some() {
             // must be set to video.
             if !has_video_type_only {
-                return Err(Error::InvalidParameter);
+                return Err(type_must_set_be_video("video_syndicated"));
             }
-
             self.insert_query_parameter(
                 &mut params,
                 "videoSyndicated",
@@ -280,22 +306,20 @@ impl ListApi<SearchListResponse> for SearchList<'_> {
         if self.video_type.is_some() {
             // must be set to video.
             if !has_video_type_only {
-                return Err(Error::InvalidParameter);
+                return Err(type_must_set_be_video("video_type"));
             }
-
             self.insert_query_parameter(&mut params, "videoType", self.video_type.as_ref());
         }
 
-        Ok(youtube
-            .client
-            .get(self.url(&youtube.base_path))
-            .query(&params)
-            .send()
-            .await
-            .unwrap()
-            .json()
-            .await
-            .unwrap())
+        let response = self
+            .send(
+                youtube
+                    .client
+                    .get(self.url(&youtube.base_path))
+                    .query(&params),
+            )
+            .await?;
+        Ok(response.json().await?)
     }
 }
 
@@ -930,36 +954,38 @@ pub struct SearchSnippet {
     pub live_broadcast_content: Option<String>,
 }
 
+fn type_must_set_be_video(parameter: &str) -> Error {
+    let additional_message = format!(
+        "parameter `type` must be set to `video` when using `{}`",
+        parameter
+    );
+    Error::invalid_parameter(format!(
+        "Request contains an invalid argument: {}",
+        additional_message
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::get_develop_key;
+    use crate::get_youtube_without_user_agent;
 
-    // search list api test will be ignored because it has a quota cost of 100 units per call.
-
-    #[ignore]
     #[tokio::test]
-    async fn test_search_list_by_keyword() {
-        let youtube = YouTube::new(get_develop_key(), None);
-
-        let response = youtube
+    async fn test_get_by_keyword() {
+        let response = get_youtube_without_user_agent()
             .search()
             .list(vec![Part::Snippet])
             .q("surfing")
             .max_results(1)
             .request()
-            .await
-            .unwrap();
-        println!("{:#?}", response);
-        assert_eq!(response.items.len(), 1);
+            .await;
+        assert_eq!(true, response.is_ok());
+        assert_eq!(response.unwrap().items.len(), 1);
     }
 
-    #[ignore]
     #[tokio::test]
-    async fn test_search_list_by_live_events() {
-        let youtube = YouTube::new(get_develop_key(), None);
-
-        let response = youtube
+    async fn test_get_by_live_events() {
+        let response = get_youtube_without_user_agent()
             .search()
             .list(vec![Part::Snippet])
             .event_type(EventType::Live)
@@ -967,26 +993,72 @@ mod tests {
             .q("news")
             .max_results(1)
             .request()
-            .await
-            .unwrap();
-        println!("{:#?}", response);
-        assert_eq!(response.items.len(), 1);
+            .await;
+        assert_eq!(true, response.is_ok());
+        assert_eq!(response.unwrap().items.len(), 1);
     }
 
-    #[ignore]
     #[tokio::test]
-    async fn test_search_list_channels_by_q() {
-        let youtube = YouTube::new(get_develop_key(), None);
-
-        let response = youtube
+    async fn test_get_channels_by_q() {
+        let response = get_youtube_without_user_agent()
             .search()
             .list(vec![Part::Id])
             .resource_type(vec![ResourceType::Channel])
-            .q("@alicemana3910")
+            .q("@YouTube")
             .request()
-            .await
-            .unwrap();
-        println!("{:#?}", response);
-        assert_ne!(response.items.len(), 0);
+            .await;
+        assert_eq!(true, response.is_ok());
+        assert_ne!(response.unwrap().items.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_request_multiple_filters() {
+        let multiple_filters = get_youtube_without_user_agent()
+            .search()
+            .list(vec![])
+            .for_content_owner(true)
+            .for_developer(true)
+            .for_mine(true)
+            .request()
+            .await;
+        assert_eq!(true, multiple_filters.is_err());
+        let err = multiple_filters.unwrap_err();
+        assert_eq!(
+            "builder error: \"Incompatible parameters specified in the request: for_content_owner, for_developer, for_mine\"",
+            format!("{}", err)
+        );
+    }
+
+    /// test use filters that require authentication wihtout authentication
+    #[tokio::test]
+    async fn test_request_without_auth() {
+        let without_auth = get_youtube_without_user_agent()
+            .search()
+            .list(vec![])
+            .for_mine(true)
+            .request()
+            .await;
+        assert_eq!(true, without_auth.is_err());
+        let err = without_auth.unwrap_err();
+        assert_eq!(
+            "builder error: \"The request uses the `for_mine` parameter but is not properly authorized\"",
+            format!("{}", err)
+        );
+    }
+
+    #[tokio::test]
+    async fn test_request_with_invalid_channel_id() {
+        let invalid_id = get_youtube_without_user_agent()
+            .search()
+            .list(vec![])
+            .channel_id("dasvvdasvrgegrebr232")
+            .request()
+            .await;
+        assert_eq!(true, invalid_id.is_err());
+        let err = invalid_id.unwrap_err();
+        let assert_message = concat!("client error: 400 Bad Request status: \"INVALID_ARGUMENT\" ",
+        "message: \"Request contains an invalid argument.\" ",
+        "[message: \"Request contains an invalid argument.\", domain: \"global\", reason: \"badRequest\"]");
+        assert_eq!(assert_message, format!("{}", err));
     }
 }

@@ -1,5 +1,7 @@
 use crate::{
-    DataApi, Error, ListApi, ListResponse, Localization, Result, Thumbnail, ThumbnailKind, YouTube,
+    error::{Error, Result},
+    ListApi, ListResponse, Localization, RequestBase, Thumbnail, ThumbnailKind, YouTube,
+    YouTubeDataApi,
 };
 
 use async_trait::async_trait;
@@ -20,7 +22,7 @@ impl ChannelsService {
         Self { youtube }
     }
 
-    pub fn list(&self, part: Vec<ChannelListPart>) -> ChannelList {
+    pub fn list(&self, part: Vec<Part>) -> ChannelList {
         ChannelList::new(&self, part)
     }
 }
@@ -29,7 +31,7 @@ struct ChannelList<'a> {
     service: &'a ChannelsService,
 
     // required parameters
-    part: Vec<ChannelListPart>,
+    part: Vec<Part>,
 
     // filters (spcify exactly one of the following parameters)
     for_username: Option<&'a str>,
@@ -44,11 +46,14 @@ struct ChannelList<'a> {
     page_token: Option<&'a str>,
 }
 
-impl DataApi for ChannelList<'_> {
+impl RequestBase for ChannelList<'_> {
     fn api_path(&self) -> &str {
         "channels"
     }
 }
+
+#[async_trait]
+impl YouTubeDataApi for ChannelList<'_> {}
 
 #[async_trait]
 impl ListApi<ChannelListResponse> for ChannelList<'_> {
@@ -56,111 +61,112 @@ impl ListApi<ChannelListResponse> for ChannelList<'_> {
         let youtube = &self.service.youtube;
 
         // createquery parameter map
-        let mut query_parameters = HashMap::<String, String>::new();
+        let mut params = HashMap::<String, String>::new();
 
         // key
-        self.insert_query_parameter(&mut query_parameters, "key", Some(&youtube.api_key));
+        self.insert_query_parameter(&mut params, "key", Some(&youtube.api_key));
 
         // required parameters
-        self.insert_query_parameters(&mut query_parameters, "part", Some(&self.part));
+        self.insert_query_parameters(&mut params, "part", Some(&self.part));
 
-        // filters
-        if vec![
-            self.for_username.is_none(),
-            self.id.is_none(),
-            self.managed_by_me.is_none(),
-            self.mine.is_none(),
+        // filter
+        let filters = vec![
+            self.for_username.is_some(),
+            self.id.is_some(),
+            self.managed_by_me.is_some(),
+            self.mine.is_some(),
         ]
         .into_iter()
-        .all(|v| v)
-        {
-            return Err(Error::InvalidParameter);
-        }
-        if let Some(for_username) = self.for_username {
-            if vec![
-                self.id.is_some(),
-                self.managed_by_me.is_some(),
-                self.mine.is_some(),
-            ]
-            .into_iter()
-            .any(|v| v)
-            {
-                return Err(Error::InvalidParameter);
+        .filter(|&v| v);
+        let count = filters.clone().count();
+
+        // filter must be specified exactly one
+        if count == 1 {
+            if let Some(for_username) = self.for_username {
+                self.insert_query_parameter(&mut params, "forUsername", Some(for_username));
             }
-            self.insert_query_parameter(&mut query_parameters, "forUsername", Some(for_username));
-        }
-        if let Some(id) = self.id {
-            if vec![
-                self.for_username.is_some(),
-                self.managed_by_me.is_some(),
-                self.mine.is_some(),
-            ]
-            .into_iter()
-            .any(|v| v)
-            {
-                return Err(Error::InvalidParameter);
+            if let Some(id) = self.id {
+                self.insert_query_parameter(&mut params, "id", Some(id));
             }
-            self.insert_query_parameter(&mut query_parameters, "id", Some(id));
-        }
-        // TODO: check if the user is authenticated
-        if let Some(_managed_by_me) = self.managed_by_me {
-            return Err(Error::NotAuthorized);
-            // if vec![
-            //     self.for_username.is_some(),
-            //     self.id.is_some(),
-            //     self.mine.is_some(),
-            // ]
-            // .into_iter()
-            // .any(|v| v)
-            // {
-            //     return Err(Error::InvalidParameter);
-            // }
-            // self.insert_query_parameter(&mut query_parameters, "managedByMe", Some(managed_by_me));
-        }
-        if let Some(_mine) = self.mine {
-            return Err(Error::NotAuthorized);
-            // if vec![
-            //     self.for_username.is_some(),
-            //     self.id.is_some(),
-            //     self.managed_by_me.is_some(),
-            // ]
-            // .into_iter()
-            // .any(|v| v)
-            // {
-            //     return Err(Error::InvalidParameter);
-            // }
-            // self.insert_query_parameter(&mut query_parameters, "mine", Some(mine));
+            // TODO: check if the user is authenticated
+            if let Some(_managed_by_me) = self.managed_by_me {
+                return Err(Error::authorization_required(
+                    "The request uses the `managed_by_me` parameter but is not properly authorized",
+                ));
+
+                // self.insert_query_parameter(
+                //     &mut query_parameters,
+                //     "managedByMe",
+                //     Some(managed_by_me),
+                // );
+            }
+            if let Some(_mine) = self.mine {
+                return Err(Error::authorization_required(
+                    "The request uses the `mine` parameter but is not properly authorized",
+                ));
+                // self.insert_query_parameter(&mut query_parameters, "mine", Some(mine));
+            }
+        } else {
+            return if count > 1 {
+                let imcompatible_params = filters
+                    .into_iter()
+                    .enumerate()
+                    .filter(|(_, v)| *v)
+                    .map(|(i, _)| match i {
+                        0 => "for_username",
+                        1 => "id",
+                        2 => "managed_by_me",
+                        3 => "mine",
+                        _ => "",
+                    })
+                    .collect::<Vec<&str>>()
+                    .join(", ");
+                Err(Error::incompatible_parameters(format!(
+                    "Incompatible parameters specified in the request: {}",
+                    imcompatible_params,
+                )))
+            } else {
+                Err(Error::missing_required_parameter(
+                    "No filter selected. Expected one of: for_username, id, managed_by_me, mine",
+                ))
+            };
         }
 
         // optional parameters
-        self.insert_query_parameter(&mut query_parameters, "hl", self.hl);
-        self.insert_query_parameter(&mut query_parameters, "maxResults", self.max_results);
-        self.insert_query_parameter(&mut query_parameters, "pageToken", self.page_token);
+        self.insert_query_parameter(&mut params, "hl", self.hl);
+        self.insert_query_parameter(&mut params, "maxResults", self.max_results);
+        self.insert_query_parameter(&mut params, "pageToken", self.page_token);
 
         // TODO: check if the user is authenticated
         if let Some(on_behalf_of_content_owner) = self.on_behalf_of_content_owner {
             if !on_behalf_of_content_owner.is_empty() {
-                return Err(Error::NotAuthorized);
+                return Err(Error::authorization_required(
+                    "The request uses the `on_behalf_of_content_owner` parameter but is not properly authorized",
+                ));
+                // self.insert_query_parameter(
+                //     &mut query_parameters,
+                //     "onBehalfOfContentOwner",
+                //     Some(on_behalf_of_content_owner),
+                // );
             }
         }
 
-        Ok(youtube
-            .client
-            .get(youtube.base_path.to_owned() + self.api_path())
-            .query(&query_parameters)
-            .send()
-            .await
-            .unwrap()
-            .json::<ChannelListResponse>()
-            .await
-            .unwrap())
+        let response = self
+            .send(
+                youtube
+                    .client
+                    .get(self.url(&youtube.base_path))
+                    .query(&params),
+            )
+            .await?;
+        Ok(response.json().await?)
     }
 }
 
 impl<'a> ChannelList<'a> {
-    pub fn new(service: &'a ChannelsService, part: Vec<ChannelListPart>) -> Self {
+    pub fn new(service: &'a ChannelsService, part: Vec<Part>) -> Self {
         let part = if part.is_empty() {
-            vec![ChannelListPart::Id]
+            vec![Part::Id]
         } else {
             part
         };
@@ -178,7 +184,7 @@ impl<'a> ChannelList<'a> {
         }
     }
 
-    pub fn part(&mut self, part: Vec<ChannelListPart>) -> &mut Self {
+    pub fn part(&mut self, part: Vec<Part>) -> &mut Self {
         self.part = part;
         self
     }
@@ -226,7 +232,7 @@ impl<'a> ChannelList<'a> {
 }
 
 #[derive(Debug, Serialize)]
-pub enum ChannelListPart {
+pub enum Part {
     AuditDetails,
     BrandingSettings,
     ContentDetails,
@@ -239,19 +245,19 @@ pub enum ChannelListPart {
     TopicDetails,
 }
 
-impl Display for ChannelListPart {
+impl Display for Part {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let str = match self {
-            ChannelListPart::AuditDetails => "auditDetails",
-            ChannelListPart::BrandingSettings => "brandingSettings",
-            ChannelListPart::ContentDetails => "contentDetails",
-            ChannelListPart::ContentOwnerDetails => "contentOwnerDetails",
-            ChannelListPart::Id => "id",
-            ChannelListPart::Localizations => "localizations",
-            ChannelListPart::Snippet => "snippet",
-            ChannelListPart::Statistics => "statistics",
-            ChannelListPart::Status => "status",
-            ChannelListPart::TopicDetails => "topicDetails",
+            Part::AuditDetails => "auditDetails",
+            Part::BrandingSettings => "brandingSettings",
+            Part::ContentDetails => "contentDetails",
+            Part::ContentOwnerDetails => "contentOwnerDetails",
+            Part::Id => "id",
+            Part::Localizations => "localizations",
+            Part::Snippet => "snippet",
+            Part::Statistics => "statistics",
+            Part::Status => "status",
+            Part::TopicDetails => "topicDetails",
         }
         .to_string();
         write!(f, "{}", str)
@@ -353,31 +359,82 @@ pub struct ChannelContentOwnerDetails {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::get_develop_key;
+    use crate::get_youtube_without_user_agent;
 
     #[tokio::test]
-    async fn test_get_list_by_id() {
-        let youtube = YouTube::new(get_develop_key(), None);
-
-        let response = youtube
+    async fn test_get_by_id() {
+        let response = get_youtube_without_user_agent()
             .channels()
-            .list(vec![ChannelListPart::Snippet])
+            .list(vec![Part::Snippet])
             .id("UCa9Y57gfeY0Zro_noHRVrnw")
             .request()
-            .await
-            .unwrap();
-        assert_eq!("UCa9Y57gfeY0Zro_noHRVrnw", response.items[0].id);
+            .await;
+        assert_eq!(true, response.is_ok());
+        assert_eq!("UCa9Y57gfeY0Zro_noHRVrnw", response.unwrap().items[0].id);
     }
 
     #[tokio::test]
-    #[should_panic]
-    async fn test_get_list_without_filters() {
-        let youtube = YouTube::new(get_develop_key(), None);
-        let _response = youtube
+    async fn test_request_with_invalid_id() {
+        let invalid_id = get_youtube_without_user_agent()
             .channels()
-            .list(vec![ChannelListPart::Snippet])
+            .list(vec![Part::Snippet])
+            .id("UC_x5XG1OV2P6uZZ5FSM9Ttw日本語한국어English")
             .request()
-            .await
-            .unwrap();
+            .await;
+        assert_eq!(true, invalid_id.is_err());
+        let err = invalid_id.unwrap_err();
+        let assert_message = concat!("client error: 400 Bad Request status: \"INVALID_ARGUMENT\" ", 
+        "message: \"Request contains an invalid argument.\" ", 
+        "[message: \"Request contains an invalid argument.\", domain: \"global\", reason: \"badRequest\"]");
+        assert_eq!(assert_message, format!("{}", err));
+    }
+
+    #[tokio::test]
+    async fn test_request_without_filters() {
+        let without_filters = get_youtube_without_user_agent()
+            .channels()
+            .list(vec![])
+            .request()
+            .await;
+        assert_eq!(true, without_filters.is_err());
+        let err = without_filters.unwrap_err();
+        assert_eq!(
+            "builder error: \"No filter selected. Expected one of: for_username, id, managed_by_me, mine\"",
+            format!("{}", err)
+        );
+    }
+
+    #[tokio::test]
+    async fn test_request_multiple_filters() {
+        let multiple_filters = get_youtube_without_user_agent()
+            .channels()
+            .list(vec![])
+            .id("something")
+            .for_username("something")
+            .request()
+            .await;
+        assert_eq!(true, multiple_filters.is_err());
+        let err = multiple_filters.unwrap_err();
+        assert_eq!(
+            "builder error: \"Incompatible parameters specified in the request: for_username, id\"",
+            format!("{}", err)
+        );
+    }
+
+    /// test use filters that require authentication wihtout authentication
+    #[tokio::test]
+    async fn test_request_without_auth() {
+        let without_auth = get_youtube_without_user_agent()
+            .channels()
+            .list(vec![])
+            .mine(true)
+            .request()
+            .await;
+        assert_eq!(true, without_auth.is_err());
+        let err = without_auth.unwrap_err();
+        assert_eq!(
+            "builder error: \"The request uses the `mine` parameter but is not properly authorized\"",
+            format!("{}", err)
+        );
     }
 }

@@ -1,5 +1,7 @@
 use crate::{
-    DataApi, Error, ListApi, ListResponse, Localization, Result, Thumbnail, ThumbnailKind, YouTube,
+    error::{Error, Result},
+    ListApi, ListResponse, Localization, RequestBase, Thumbnail, ThumbnailKind, YouTube,
+    YouTubeDataApi,
 };
 
 use async_trait::async_trait;
@@ -46,11 +48,14 @@ struct VideoList<'a> {
     video_category_id: Option<&'a str>,
 }
 
-impl DataApi for VideoList<'_> {
+impl RequestBase for VideoList<'_> {
     fn api_path(&self) -> &str {
         "videos"
     }
 }
+
+#[async_trait]
+impl YouTubeDataApi for VideoList<'_> {}
 
 #[async_trait]
 impl ListApi<VideoListResponse> for VideoList<'_> {
@@ -73,32 +78,51 @@ impl ListApi<VideoListResponse> for VideoList<'_> {
             self.my_rating.is_some(),
         ]
         .into_iter()
-        .filter(|&x| x)
-        .count();
+        .filter(|&x| x);
+        let count = filters.clone().count();
         // filter must be specified exactly one
-        if filters == 1 {
+        if count == 1 {
             if let Some(chart) = &self.chart {
                 self.insert_query_parameter(&mut params, "chart", Some(chart));
                 self.insert_query_parameter(&mut params, "videoCategoryId", self.video_category_id);
             }
             if let Some(id) = &self.id {
                 if id.is_empty() {
-                    return Err(Error::InvalidParameter);
+                    return Err(Error::missing_required_parameter(
+                        "No filter selected. Expected one of: chart, id, my_rating",
+                    ));
                 }
                 self.insert_query_parameters(&mut params, "id", Some(&id));
             }
             // TODO: check if the user is authenticated
             if let Some(_my_rating) = &self.my_rating {
-                return Err(Error::NotAuthorized);
+                return Err(Error::authorization_required(
+                    "The request uses the `my_rating` parameter but is not properly authorized",
+                ));
                 // self.insert_query_parameter(&mut params, "myRating", Some(my_rating));
             }
         } else {
-            return if filters > 1 {
-                // specify exactly one of the following parameters: chart, id, myRating
-                Err(Error::InvalidParameter)
+            return if count > 1 {
+                let imcompatible_params = filters
+                    .into_iter()
+                    .enumerate()
+                    .filter(|(_, v)| *v)
+                    .map(|(i, _)| match i {
+                        0 => "chart",
+                        1 => "id",
+                        2 => "my_rating",
+                        _ => "",
+                    })
+                    .collect::<Vec<&str>>()
+                    .join(", ");
+                Err(Error::incompatible_parameters(format!(
+                    "Incompatible parameters specified in the request: {}",
+                    imcompatible_params,
+                )))
             } else {
-                // specify one of the following parameters: chart, id, myRating
-                Err(Error::InvalidParameter)
+                Err(Error::missing_required_parameter(
+                    "No filter selected. Expected one of: chart, id, my_rating",
+                ))
             };
         }
 
@@ -108,22 +132,22 @@ impl ListApi<VideoListResponse> for VideoList<'_> {
         self.insert_query_parameter(&mut params, "maxResults", self.max_results);
         self.insert_query_parameter(&mut params, "maxWidth", self.max_width);
         if self.on_behalf_of_content_owner.is_some() {
-            // This parameter is intended exclusively for YouTube content partners.
-            return Err(Error::NotAuthorized);
+            return Err(Error::authorization_required(
+                "The request uses the `on_behalf_of_content_owner` parameter but is not properly authorized",
+            ));
         }
         self.insert_query_parameter(&mut params, "pageToken", self.page_token);
         self.insert_query_parameter(&mut params, "regionCode", self.region_code);
 
-        Ok(youtube
-            .client
-            .get(self.url(&youtube.base_path))
-            .query(&params)
-            .send()
-            .await
-            .unwrap()
-            .json()
-            .await
-            .unwrap())
+        let response = self
+            .send(
+                youtube
+                    .client
+                    .get(self.url(&youtube.base_path))
+                    .query(&params),
+            )
+            .await?;
+        Ok(response.json().await?)
     }
 }
 
@@ -611,66 +635,62 @@ pub struct VideoLiveStreamingDetails {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::get_develop_key;
+    use crate::get_youtube_without_user_agent;
 
     #[tokio::test]
-    #[should_panic]
-    async fn test_request_without_filter() {
-        let youtube = YouTube::new(get_develop_key(), None);
-
-        let _ = youtube
+    async fn test_request_without_filters() {
+        let without_filters = get_youtube_without_user_agent()
             .videos()
-            .list(vec![Part::Snippet])
+            .list(vec![])
             .request()
-            .await
-            .unwrap();
+            .await;
+        assert!(without_filters.is_err());
+        let err = without_filters.unwrap_err();
+        assert_eq!(
+            "builder error: \"No filter selected. Expected one of: chart, id, my_rating\"",
+            format!("{}", err)
+        );
     }
 
     #[tokio::test]
-    #[should_panic]
     async fn test_request_multiple_filters() {
-        let youtube = YouTube::new(get_develop_key(), None);
-
-        let _ = youtube
+        let multiple_filters = get_youtube_without_user_agent()
             .videos()
             .list(vec![Part::Snippet])
             .chart(Chart::MostPopular)
             .id(vec!["Ks-_Mh1QhMc", "c0KYU2j0TM4", "eIho2S0ZahI"])
             .request()
-            .await
-            .unwrap();
+            .await;
+        assert!(multiple_filters.is_err());
+        let err = multiple_filters.unwrap_err();
+        assert_eq!(
+            "builder error: \"Incompatible parameters specified in the request: chart, id\"",
+            format!("{}", err)
+        );
     }
 
     #[tokio::test]
     async fn test_get_by_id() {
-        let youtube = YouTube::new(get_develop_key(), None);
-
-        let response = youtube
+        let response = get_youtube_without_user_agent()
             .videos()
             .list(vec![Part::Snippet])
             .id(vec!["Ks-_Mh1QhMc"])
             .request()
             .await
             .unwrap();
-        println!("{:#?}", response);
-
         assert_eq!(response.items.len(), 1);
         assert_eq!(response.items[0].id, "Ks-_Mh1QhMc");
     }
 
     #[tokio::test]
     async fn test_get_by_multiple_ids() {
-        let youtube = YouTube::new(get_develop_key(), None);
-
-        let response = youtube
+        let response = get_youtube_without_user_agent()
             .videos()
             .list(vec![Part::Snippet])
             .id(vec!["Ks-_Mh1QhMc", "c0KYU2j0TM4", "eIho2S0ZahI"])
             .request()
             .await
             .unwrap();
-        println!("{:#?}", response);
-
         assert_eq!(response.items.len(), 3);
         assert_eq!(response.items[0].id, "Ks-_Mh1QhMc");
         assert_eq!(response.items[1].id, "c0KYU2j0TM4");
@@ -679,9 +699,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_most_popular_videos() {
-        let youtube = YouTube::new(get_develop_key(), None);
-
-        let response = youtube
+        let response = get_youtube_without_user_agent()
             .videos()
             .list(vec![Part::Snippet])
             .chart(Chart::MostPopular)
@@ -697,18 +715,31 @@ mod tests {
     #[ignore]
     #[tokio::test]
     async fn test_get_upcoming_live_videos() {
-        let youtube = YouTube::new(get_develop_key(), None);
-
-        let response = youtube
+        let response = get_youtube_without_user_agent()
             .videos()
             .list(vec![Part::Snippet, Part::LiveStreamingDetails])
             .id(vec!["wPXfKeWU2YE"])
             .request()
             .await
             .unwrap();
-        println!("{:#?}", response);
-
         assert_eq!(response.items.len(), 1);
         assert_eq!(response.items[0].id, "wPXfKeWU2YE");
+    }
+
+    /// test use filters that require authentication wihtout authentication
+    #[tokio::test]
+    async fn test_request_without_auth() {
+        let without_auth = get_youtube_without_user_agent()
+            .videos()
+            .list(vec![])
+            .my_rating(MyRating::Like)
+            .request()
+            .await;
+        assert_eq!(true, without_auth.is_err());
+        let err = without_auth.unwrap_err();
+        assert_eq!(
+            "builder error: \"The request uses the `my_rating` parameter but is not properly authorized\"",
+            format!("{}", err)
+        );
     }
 }

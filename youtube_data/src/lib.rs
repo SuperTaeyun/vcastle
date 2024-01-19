@@ -10,7 +10,6 @@ pub mod search;
 pub mod videos;
 
 use channels::ChannelsService;
-use error::{Error, Result};
 use search::SearchService;
 use videos::VideosService;
 
@@ -67,13 +66,12 @@ impl YouTube {
     }
 }
 
-/// The base trait for all YouTube Data CRUD APIs.
-pub trait DataApi {
+pub(crate) trait RequestBase {
+    fn api_path(&self) -> &str;
+
     fn url(&self, base_path: impl Into<String>) -> String {
         format!("{}/{}", base_path.into(), self.api_path())
     }
-
-    fn api_path(&self) -> &str;
 
     fn insert_query_parameter(
         &self,
@@ -124,11 +122,39 @@ pub trait DataApi {
 }
 
 #[async_trait]
-pub trait ListApi<T>: DataApi
+pub(crate) trait YouTubeDataApi: RequestBase {
+    async fn send(&self, request: reqwest::RequestBuilder) -> error::Result<reqwest::Response> {
+        let response = request.send().await?;
+        let status = response.status();
+        // handle status code
+        if status.is_success() {
+            return Ok(response);
+        }
+        // TODO: implement a handle for the informational status code
+        if status.is_informational() {
+            panic!("Informational Responses");
+        }
+        // TODO: implement a handle for the redirection status code
+        if status.is_redirection() {
+            panic!("Redirection Responses");
+        }
+        if status.is_client_error() {
+            return Err(error::Error::client_error(
+                response.json::<error::YouTubeError>().await?,
+            ));
+        } else {
+            // TODO: implement a handle for the server error status code
+            panic!("Server Error");
+        }
+    }
+}
+
+#[async_trait]
+pub trait ListApi<T>: YouTubeDataApi
 where
     T: serde::Serialize,
 {
-    async fn request(&self) -> Result<T>;
+    async fn request(&self) -> error::Result<T>;
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -234,6 +260,11 @@ pub(crate) fn get_develop_key() -> String {
 }
 
 #[cfg(test)]
+pub(crate) fn get_youtube_without_user_agent() -> YouTube {
+    YouTube::new(get_develop_key(), None)
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -241,7 +272,7 @@ mod tests {
 
     struct Test {}
 
-    impl DataApi for Test {
+    impl RequestBase for Test {
         fn api_path(&self) -> &str {
             "tests"
         }
