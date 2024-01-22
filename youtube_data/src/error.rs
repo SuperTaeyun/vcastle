@@ -344,7 +344,7 @@ mod tests {
             serde_json::from_str(YOUTUBE_ERROR_JSON).unwrap(),
             Url::parse("https://www.youtube.com").unwrap(),
         );
-        let assert_message = concat!("client error: 400 Bad Request message: \"No filter selected.", 
+        let assert_message = concat!("client error for url (\"/?\"): 400 Bad Request message: \"No filter selected.",
         " Expected one of: for_username, id, managed_by_me, mine\"",
         " [message: \"No filter selected. Expected one of: for_username, id, managed_by_me, mine\",",
         " domain: \"youtube.parameter\", reason: \"missingRequiredParameter\"]"
